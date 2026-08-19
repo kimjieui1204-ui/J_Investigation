@@ -37,13 +37,18 @@ TAGS = {
         "StockholdersEquity",
         "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"]),
     "liab":   ("USD", True, ["Liabilities"]),
+    # Liabilities 를 따로 안 적는 회사가 절반쯤 됩니다. 총자산 − 자기자본으로 냅니다.
+    "lse":    ("USD", True, ["LiabilitiesAndStockholdersEquity", "Assets"]),
     "ni":     ("USD", False, ["NetIncomeLoss", "ProfitLoss"]),
     "ocf":    ("USD", False, [
         "NetCashProvidedByUsedInOperatingActivities",
         "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"]),
     "capex":  ("USD", False, [
         "PaymentsToAcquirePropertyPlantAndEquipment",
-        "PaymentsToAcquireProductiveAssets"]),
+        "PaymentsToAcquireProductiveAssets",
+        "PaymentsForCapitalImprovements",
+        "PaymentsToAcquireOtherPropertyPlantAndEquipment",
+        "PaymentsToAcquireMachineryAndEquipment"]),
     "rev":    ("USD", False, [
         "RevenueFromContractWithCustomerExcludingAssessedTax",
         "Revenues",
@@ -109,7 +114,9 @@ def derive(raw):
 
     eq, ni = pick(raw, "equity"), pick(raw, "ni")
     ocf, cap = pick(raw, "ocf"), pick(raw, "capex")
-    rev, eps, lb = pick(raw, "rev"), pick(raw, "eps"), pick(raw, "liab")
+    rev, eps = pick(raw, "rev"), pick(raw, "eps")
+    lb, lse = pick(raw, "liab"), pick(raw, "lse")
+    lsed = dict(lse)
     eqd = dict(eq)
     revd = dict(rev)
     capd = dict(cap)
@@ -135,8 +142,11 @@ def derive(raw):
     if out["epsCagr"] is None:
         miss.append("EPS성장률")
 
-    last_eq = eq[-1][1] if eq else None
+    last_eq_row = eq[-1] if eq else None
+    last_eq = last_eq_row[1] if last_eq_row else None
     last_lb = lb[-1][1] if lb else None
+    if last_lb is None and last_eq_row and last_eq_row[0] in lsed:
+        last_lb = lsed[last_eq_row[0]] - last_eq_row[1]   # 총자산 − 자기자본
     out["debt"] = (last_lb / last_eq) if (last_eq and last_eq > 0
                                           and last_lb is not None) else None
 
@@ -192,8 +202,8 @@ def main():
                     if y not in slot:
                         slot[y] = d["val"]
                         hit += 1
-                if hit:
-                    break                            # 첫 태그로 채워지면 대체 태그는 생략
+                # ★ 여기서 break 하면 안 됩니다. 회사마다 쓰는 태그가 다릅니다.
+                #   설비투자를 69종목 중 48곳만 찾다가, 전부 훑게 바꾸니 63곳이 됐습니다.
             print(f"  {metric} CY{y} → {hit}건")
 
     rows = {}
@@ -220,3 +230,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+

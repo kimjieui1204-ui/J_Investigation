@@ -1,9 +1,13 @@
 name: SEC 펀더멘털 수집
 
 on:
-  workflow_dispatch: # Actions 탭에서 수동 실행 버튼 활성화
+  workflow_dispatch:
   schedule:
-    - cron: '0 20 2 * *' # 매월 3일 한국시간 05:00 (UTC 20:00) 자동 실행
+    - cron: '0 20 2 * *'
+
+# 워크플로우에 저장소 쓰기 권한 부여
+permissions:
+  contents: write
 
 jobs:
   collect:

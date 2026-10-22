@@ -80,16 +80,29 @@ def get(url, tries=4):
 
 # ── 파생 계산 — 20_Screener.gs 의 scrDerive() 와 같은 규칙 ────────────
 
+def median(vals):
+    s = sorted(vals)
+    if not s:
+        return None
+    m = len(s) // 2
+    return s[m] if len(s) % 2 else (s[m - 1] + s[m]) / 2.0
+
+
 def cagr(series):
     """series = [(연도, 값)] 오름차순.
        시작이 적자면 CAGR 은 의미가 없어 None,
-       끝이 적자면 최악값 -1 로 둡니다."""
+       끝이 적자면 최악값 -1 로 둡니다.
+       시작값이 기간 중앙값의 1/3 미만이면 기저효과로 보고 None.
+       (MRK: 2023 일회성 상각으로 EPS 0.15 → 8 달러 회복을 621% 로 잰 사고)"""
     if len(series) < 2:
         return None
     (y0, a), (y1, b) = series[0], series[-1]
     n = y1 - y0
     if n <= 0 or a <= 0:
         return None
+    med = median([v for _, v in series])
+    if med is not None and med > 0 and a < med / 3:
+        return None                      # 기저효과 — "모른다" 가 "621%" 보다 정확
     if b <= 0:
         return -1.0
     return (b / a) ** (1.0 / n) - 1.0

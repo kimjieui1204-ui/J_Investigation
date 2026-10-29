@@ -205,6 +205,9 @@ def derive(raw):
     fm = sum(fv) / len(fv) if fv else 0.0
     out["ffoVol"] = (fsd / abs(fm)) if (fsd is not None and abs(fm) > 1e-9) else None
     out["ffo"] = (ni[-1][1] + abs(depd[ni[-1][0]])) if (ni and ni[-1][0] in depd) else None
+    # 시가총액 교차검증용 (2026-10-29): 시트의 GOOGLEFINANCE 시가총액이 JPM·JNJ·PFE 에서 수십 배 작게 나옴
+    out["niLast"] = ni[-1][1] if ni else None
+    out["shares"] = sh[-1][1] if sh else None
 
     out["years"] = "·".join(str(y) for y, _ in eq)
     out["reason"] = (

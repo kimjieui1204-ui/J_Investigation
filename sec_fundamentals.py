@@ -55,7 +55,29 @@ TAGS = {
         "RevenueFromContractWithCustomerIncludingAssessedTax"]),
     "eps":    ("USD-per-shares", False, [
         "EarningsPerShareDiluted", "EarningsPerShareBasic"]),
+    # ── 업종별 지표용 (2026-10-29 추가) ──
+    # 리츠 FFO = 순이익 + 감가상각. 주당 FFO 성장률에 주식 수가 필요합니다.
+    "shares": ("shares", False, [
+        "WeightedAverageNumberOfDilutedSharesOutstanding",
+        "WeightedAverageNumberOfSharesOutstandingBasic"]),
+    "dep":    ("USD", False, [
+        "DepreciationDepletionAndAmortization", "DepreciationAndAmortization",
+        "DepreciationAmortizationAndAccretionNet", "Depreciation"]),
 }
+
+# 업종 구분 — SEC SIC 코드. 금융 6000~6411, 리츠 6798, 나머지 일반.
+# 20_Screener.gs 의 scrGroup() 과 같아야 합니다.
+SUBMISSIONS = "https://data.sec.gov/submissions/CIK{:010d}.json"
+
+
+def group_of_sic(sic):
+    if not sic:
+        return "gen"
+    if sic == 6798:
+        return "reit"
+    if 6000 <= sic <= 6411:
+        return "fin"
+    return "gen"
 
 
 def get(url, tries=4):
@@ -168,6 +190,22 @@ def derive(raw):
     mean = sum(ev) / len(ev) if ev else 0.0
     out["epsVol"] = (sd / abs(mean)) if (sd is not None and abs(mean) > 1e-9) else None
 
+    # ── 업종별 지표 (backtest3.py derive 와 같은 정의) ──
+    dep, sh = pick(raw, "dep"), pick(raw, "shares")
+    depd, shd = dict(dep), dict(sh)
+    roas = [v / lsed[y] for y, v in ni if lsed.get(y, 0) > 0]
+    out["roa"] = sum(roas) / len(roas) if roas else None
+    out["equity"] = last_eq
+    out["debtA"] = (last_lb / lsed[last_eq_row[0]]) if (
+        last_eq_row and last_lb is not None and lsed.get(last_eq_row[0], 0) > 0) else None
+    ffo_ps = [(y, (v + abs(depd[y])) / shd[y]) for y, v in ni if y in depd and shd.get(y, 0) > 0]
+    out["ffoCagr"] = cagr(ffo_ps)
+    fv = [v for _, v in ffo_ps]
+    fsd = stdev(fv)
+    fm = sum(fv) / len(fv) if fv else 0.0
+    out["ffoVol"] = (fsd / abs(fm)) if (fsd is not None and abs(fm) > 1e-9) else None
+    out["ffo"] = (ni[-1][1] + abs(depd[ni[-1][0]])) if (ni and ni[-1][0] in depd) else None
+
     out["years"] = "·".join(str(y) for y, _ in eq)
     out["reason"] = (
         "·".join(miss) + " 없음 — SEC 미국 회계기준 공시에서 찾지 못했습니다"
@@ -219,13 +257,48 @@ def main():
                 #   설비투자를 69종목 중 48곳만 찾다가, 전부 훑게 바꾸니 63곳이 됐습니다.
             print(f"  {metric} CY{y} → {hit}건")
 
+    tick2cik = {t: c for c, t in cik2tick.items()}
     rows = {}
     for tk, raw in store.items():
         d = derive(raw)
         # 품질·성장을 둘 다 못 채운 종목은 실을 이유가 없습니다. 파일만 커집니다.
-        if d["roe"] is None and d["epsCagr"] is None:
+        # (금융은 ROA, 리츠는 FFO 성장률로도 채점되므로 그것만 있어도 남깁니다)
+        if d["roe"] is None and d["epsCagr"] is None and d["roa"] is None and d["ffoCagr"] is None:
             continue
+        d["cik"] = tick2cik.get(tk, "")
         rows[tk] = d
+
+    # 업종(SIC). 회사마다 한 번씩 불러야 해서, 지난 파일에 있던 값은 다시 부르지 않습니다.
+    cache = {}
+    try:
+        with open(OUT, encoding="utf-8") as f:
+            for tk, d in (json.load(f).get("data") or {}).items():
+                if d.get("sic") is not None and d.get("cik"):
+                    cache[str(d["cik"])] = d["sic"]
+    except Exception:
+        pass
+    fetched = 0
+    for tk, d in rows.items():
+        c = d["cik"]
+        if not c:
+            d["sic"], d["grp"] = None, "gen"
+            continue
+        if c not in cache:
+            sub = get(SUBMISSIONS.format(int(c)))
+            time.sleep(0.12)
+            try:
+                cache[c] = int((sub or {}).get("sic") or 0)
+            except (TypeError, ValueError):
+                cache[c] = 0
+            fetched += 1
+            if fetched % 500 == 0:
+                print(f"  SIC {fetched}건")
+        d["sic"] = cache[c]
+        d["grp"] = group_of_sic(cache[c])
+    grp_n = {}
+    for d in rows.values():
+        grp_n[d["grp"]] = grp_n.get(d["grp"], 0) + 1
+    print(f"SIC 새로 {fetched}건 · 업종 {grp_n}")
 
     payload = {
         "generated": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
